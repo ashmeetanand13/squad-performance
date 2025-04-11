@@ -5,7 +5,7 @@ import requests
 from io import StringIO
 
 # The raw GitHub URL for your data
-GITHUB_RAW_URL = "https://raw.githubusercontent.com/ashmeetanand13/footy_world/main/df_clean.csv"
+GITHUB_RAW_URL = "https://github.com/ashmeetanand13/squad-performance/blob/main/df_clean.csv"
 
 def load_data():
     """
