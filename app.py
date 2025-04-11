@@ -4,6 +4,8 @@ import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime
+import requests
+from io import StringIO
 
 # Set page config
 st.set_page_config(
@@ -13,7 +15,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for styling
+# Custom CSS for styling (unchanged)
 st.markdown("""
 <style>
     .main-header {
@@ -75,7 +77,191 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Data loading functions
+# Real data loading function
+@st.cache_data
+def load_real_data():
+    """
+    Load football data directly from GitHub with improved error handling
+    
+    Returns:
+        DataFrame: Player-level data or None if loading fails
+    """
+    # The raw GitHub URL for your data - using the RAW URL format
+    GITHUB_RAW_URL = 'https://raw.githubusercontent.com/ashmeetanand13/squad-performance/main/df_clean.csv'
+    
+    try:
+        # Show loading status
+        with st.spinner("Loading data from GitHub..."):
+            # Fetch data from GitHub
+            response = requests.get(GITHUB_RAW_URL, timeout=10)
+            response.raise_for_status()  # Raise exception for HTTP errors
+            
+            # Parse CSV data with more robust settings
+            content = StringIO(response.text)
+            
+            # Try different parsers and settings
+            try:
+                # First try: with default settings but more permissive
+                df = pd.read_csv(
+                    content, 
+                    low_memory=False,
+                    on_bad_lines='skip',  # Skip bad lines
+                    engine='python'      # Use more flexible python engine
+                )
+                if df.shape[0] > 0:
+                    st.info(f"Successfully loaded real data, skipping some malformed lines. Shape: {df.shape}")
+                else:
+                    raise ValueError("No valid rows found in CSV")
+                    
+            except Exception as e1:
+                st.warning(f"First parsing attempt failed: {str(e1)}")
+                
+                # Reset file pointer to beginning
+                content.seek(0)
+                
+                try:
+                    # Second try: with more flexible parsing and attempt to detect delimiter
+                    df = pd.read_csv(
+                        content, 
+                        low_memory=False,
+                        on_bad_lines='skip',
+                        delimiter=None,         # Try to auto-detect delimiter
+                        engine='python'         # Use more flexible python engine
+                    )
+                    st.warning("CSV had some formatting issues. Some rows may have been skipped.")
+                except Exception as e2:
+                    # If all attempts fail, fallback to sample data
+                    st.error(f"Could not parse CSV file: {str(e2)}")
+                    return None
+            
+            # Basic data cleaning
+            if 'Rk' in df.columns:
+                df = df.drop('Rk', axis=1)
+            
+            # Log success and return
+            st.success(f"Successfully loaded real data with {df.shape[0]} rows and {df.shape[1]} columns")
+            return df
+    
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error fetching data from GitHub: {str(e)}")
+        
+        # Detailed error information to help debugging
+        if hasattr(e, 'response') and e.response is not None:
+            st.error(f"Response status code: {e.response.status_code}")
+            st.error(f"Response text: {e.response.text[:500]}...")
+        
+        return None
+    except Exception as e:
+        st.error(f"Unexpected error loading data: {str(e)}")
+        return None
+
+# Function to process player-level data to team-level metrics
+@st.cache_data
+def compute_team_metrics(df):
+    """
+    Aggregate player-level data to team-level metrics
+    
+    Args:
+        df: DataFrame containing player-level data
+        
+    Returns:
+        DataFrame: Aggregated team-level metrics
+    """
+    if df is None:
+        return None
+    
+    try:
+        # Check if data is already at team level
+        if 'Squad' in df.columns and df.shape[0] <= 100:
+            # Probably team-level data already
+            st.info("Data appears to be already at team level")
+            return df
+            
+        # Group by squad, competition, and season
+        if all(col in df.columns for col in ['Squad', 'Competition', 'Season']):
+            grouped = df.groupby(['Squad', 'Competition', 'Season'])
+        elif all(col in df.columns for col in ['Squad', 'Comp', 'Season']):
+            # Handle different column names
+            grouped = df.groupby(['Squad', 'Comp', 'Season'])
+            df = df.rename(columns={'Comp': 'Competition'})
+        else:
+            st.error("Required columns for grouping not found in data")
+            return None
+        
+        # Create team metrics dictionary
+        teams_data = []
+        
+        for name, team_df in grouped:
+            if len(name) == 3:
+                squad, competition, season = name
+            else:
+                squad = name
+                competition = "Unknown"
+                season = "2022-23"
+                
+            team_data = {
+                'Squad': squad,
+                'Competition': competition,
+                'Season': season
+            }
+            
+            # Detect columns for different metrics
+            # This is flexible to handle different column naming schemes
+            
+            # Attack metrics
+            goals_cols = [col for col in team_df.columns if 'Goal' in col or 'Gls' in col]
+            shots_cols = [col for col in team_df.columns if 'Shot' in col or 'Sh' in col]
+            xg_cols = [col for col in team_df.columns if 'xG' in col]
+            
+            # Time metrics
+            time_cols = [col for col in team_df.columns if '90' in col or 'Min' in col]
+            
+            # Calculate basic metrics where possible
+            # Goals
+            if goals_cols:
+                goals_col = goals_cols[0]
+                team_data['Goals'] = team_df[goals_col].sum()
+            
+            # Shots
+            if shots_cols:
+                shots_col = shots_cols[0]
+                team_data['Shots'] = team_df[shots_col].sum()
+            
+            # xG
+            if xg_cols:
+                xg_col = xg_cols[0]
+                team_data['xG'] = team_df[xg_col].sum()
+            
+            # Playing time
+            if time_cols:
+                time_col = time_cols[0]
+                team_data['Playing Time 90s'] = team_df[time_col].sum()
+                
+                # Per 90 metrics
+                if 'Goals' in team_data:
+                    team_data['Goals Per 90'] = team_data['Goals'] / max(1, team_data['Playing Time 90s'])
+                
+                if 'Shots' in team_data:
+                    team_data['Shots Per 90'] = team_data['Shots'] / max(1, team_data['Playing Time 90s'])
+                
+                if 'xG' in team_data:
+                    team_data['xG Per 90'] = team_data['xG'] / max(1, team_data['Playing Time 90s'])
+            
+            # Add any other metrics that can be calculated
+            teams_data.append(team_data)
+        
+        # Create DataFrame from the team metrics
+        teams_df = pd.DataFrame(teams_data)
+        
+        # Display information about successful conversion
+        st.info(f"Successfully aggregated data to {teams_df.shape[0]} teams")
+        return teams_df
+    
+    except Exception as e:
+        st.error(f"Error computing team metrics: {str(e)}")
+        return None
+
+# Sample data function (unchanged)
 @st.cache_data
 def load_sample_data():
     """
@@ -178,6 +364,42 @@ def load_sample_data():
     st.success("Using sample data with 50 teams across 5 major leagues")
     return normalized_teams_df
 
+# Combined function to load either real or sample data
+@st.cache_data
+def load_and_process_data():
+    """
+    Load and process the football data
+    
+    Returns:
+        DataFrame: Processed team-level data
+    """
+    # First, try to load real data
+    df = load_real_data()
+    
+    if df is not None:
+        # Process the real data - aggregate from player to team level
+        try:
+            st.info("Processing player data to team-level metrics...")
+            # Compute team metrics from player data
+            teams_df = compute_team_metrics(df)
+            
+            if teams_df is not None:
+                # Normalize the metrics
+                normalized_teams_df = normalize_metrics(teams_df)
+                st.success("Successfully processed real data!")
+                return normalized_teams_df
+            else:
+                raise Exception("Failed to compute team metrics")
+        except Exception as e:
+            st.error(f"Error processing real data: {str(e)}")
+            st.warning("Falling back to sample data")
+            return load_sample_data()
+    else:
+        # If real data loading fails, use sample data
+        st.warning("Using sample data because real data could not be loaded")
+        return load_sample_data()
+
+# The remaining functions are unchanged
 @st.cache_data
 def calculate_similarity(team1_data, team2_data):
     """Calculate similarity score between two teams based on their normalized metrics"""
@@ -491,17 +713,23 @@ def main():
     # Add last updated timestamp
     st.markdown(f"<p style='text-align: right; color: #888;'>Last updated: {datetime.now().strftime('%B %d, %Y')}</p>", unsafe_allow_html=True)
     
-    # Display notice about sample data
-    st.info("📊 Using sample data for demonstration purposes. This dashboard showcases team-level analytics across major European football leagues.")
-    
     # Initialize session state vars if needed
     if 'normalized_teams_df' not in st.session_state:
         st.session_state['normalized_teams_df'] = None
     
+    # Add a toggle to force sample data for testing
+    use_sample_data = st.sidebar.checkbox("Use sample data (for testing)", value=False)
+    
     # Load and process data
     with st.spinner("Loading data..."):
-        # Use sample data directly since GitHub data had issues
-        normalized_teams_df = load_sample_data()
+        if use_sample_data:
+            # Use sample data if checkbox is selected
+            normalized_teams_df = load_sample_data()
+            st.info("Using sample data as requested")
+        else:
+            # Try to load real data first, fall back to sample if needed
+            normalized_teams_df = load_and_process_data()
+            
         # Store in session state
         st.session_state['normalized_teams_df'] = normalized_teams_df
     
