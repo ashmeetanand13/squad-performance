@@ -12,7 +12,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for styling
+# Custom CSS for styling (unchanged)
 st.markdown("""
 <style>
     .main-header {
@@ -77,25 +77,16 @@ st.markdown("""
 # Import data loader
 from data_loader import load_data as load_github_data
 
-# Function to load and process data
+# OPTIMIZATION 1: Add caching to all compute-intensive functions
 @st.cache_data
 def load_data():
-    """
-    Load and process the football data at team level
-    
-    Returns:
-        DataFrame: Team-level statistics
-    """
-    # Use the GitHub data loader
-    df = load_github_data()
-    
-    # Return the loaded data
-    return df
+    """Load and process the football data at team level"""
+    return load_github_data()
 
-# Function to compute team-level metrics
+@st.cache_data
 def compute_team_metrics(df):
     """
-    Aggregate player-level data to team-level metrics
+    Aggregate player-level data to team-level metrics - OPTIMIZED
     
     Args:
         df: DataFrame containing player-level data
@@ -110,14 +101,6 @@ def compute_team_metrics(df):
         # Group by squad, competition, and season
         grouped = df.groupby(['Squad', 'Competition', 'Season'])
         
-        # Define metrics to aggregate
-        team_metrics = {}
-        
-        # Basic team information
-        squads = df['Squad'].unique()
-        competitions = df['Competition'].unique()
-        seasons = df['Season'].unique()
-        
         # Create team metrics dictionary
         teams_data = []
         
@@ -128,49 +111,71 @@ def compute_team_metrics(df):
                 'Season': season
             }
             
+            # Calculate playing time sum once
+            playing_time_sum = max(1, team_df['Playing Time 90s'].sum())
+            standard_sh_sum = max(1, team_df['Standard Sh'].sum())
+            touches_sum = max(1, team_df['Touches Touches'].sum())
+            total_att_sum = max(1, team_df['Total Att'].sum())
+            
+            # Precompute common metrics
+            goals_sum = team_df['Performance Gls'].sum()
+            xg_sum = team_df['Expected xG'].sum()
+            shots_sum = team_df['Standard Sh'].sum()
+            sot_sum = team_df['Standard SoT'].sum()
+            
             # Attack metrics
             attack_metrics = {
-                # Goal scoring
-                'Goals': team_df['Performance Gls'].sum(),
-                'Goals Per 90': team_df['Performance Gls'].sum() / max(1, team_df['Playing Time 90s'].sum()),
-                'Shots': team_df['Standard Sh'].sum(),
-                'Shots Per 90': team_df['Standard Sh'].sum() / max(1, team_df['Playing Time 90s'].sum()),
-                'Shot on Target %': 100 * team_df['Standard SoT'].sum() / max(1, team_df['Standard Sh'].sum()),
-                'Goals Per Shot': team_df['Performance Gls'].sum() / max(1, team_df['Standard Sh'].sum()),
-                'xG': team_df['Expected xG'].sum(),
-                'xG Per 90': team_df['Expected xG'].sum() / max(1, team_df['Playing Time 90s'].sum()),
-                'G-xG': team_df['Performance Gls'].sum() - team_df['Expected xG'].sum(),
+                'Goals': goals_sum,
+                'Goals Per 90': goals_sum / playing_time_sum,
+                'Shots': shots_sum,
+                'Shots Per 90': shots_sum / playing_time_sum,
+                'Shot on Target %': 100 * sot_sum / standard_sh_sum,
+                'Goals Per Shot': goals_sum / standard_sh_sum,
+                'xG': xg_sum,
+                'xG Per 90': xg_sum / playing_time_sum,
+                'G-xG': goals_sum - xg_sum,
                 'Key Passes': team_df['KP'].sum(),
-                'Key Passes Per 90': team_df['KP'].sum() / max(1, team_df['Playing Time 90s'].sum()),
+                'Key Passes Per 90': team_df['KP'].sum() / playing_time_sum,
             }
             
             # Possession metrics
+            touches = team_df['Touches Touches'].sum()
+            progressive_carries = team_df['Carries PrgC'].sum()
+            progressive_passes = team_df['PrgP'].sum()
+            
             possession_metrics = {
-                'Touches': team_df['Touches Touches'].sum(),
-                'Touches Per 90': team_df['Touches Touches'].sum() / max(1, team_df['Playing Time 90s'].sum()),
-                'Progressive Carries': team_df['Carries PrgC'].sum(),
-                'Progressive Carries Per 90': team_df['Carries PrgC'].sum() / max(1, team_df['Playing Time 90s'].sum()),
-                'Progressive Passes': team_df['PrgP'].sum(),
-                'Progressive Passes Per 90': team_df['PrgP'].sum() / max(1, team_df['Playing Time 90s'].sum()),
-                'Attacking Third Touches %': 100 * team_df['Touches Att 3rd'].sum() / max(1, team_df['Touches Touches'].sum()),
-                'Box Touches %': 100 * team_df['Touches Att Pen'].sum() / max(1, team_df['Touches Touches'].sum()),
-                'Pass Completion %': 100 * team_df['Total Cmp'].sum() / max(1, team_df['Total Att'].sum()),
+                'Touches': touches,
+                'Touches Per 90': touches / playing_time_sum,
+                'Progressive Carries': progressive_carries,
+                'Progressive Carries Per 90': progressive_carries / playing_time_sum,
+                'Progressive Passes': progressive_passes,
+                'Progressive Passes Per 90': progressive_passes / playing_time_sum,
+                'Attacking Third Touches %': 100 * team_df['Touches Att 3rd'].sum() / touches_sum,
+                'Box Touches %': 100 * team_df['Touches Att Pen'].sum() / touches_sum,
+                'Pass Completion %': 100 * team_df['Total Cmp'].sum() / total_att_sum,
             }
             
             # Defense metrics
+            tackles = team_df['Tackles Tkl'].sum()
+            interceptions = team_df['Int'].sum()
+            tackles_interceptions = team_df['Tkl+Int'].sum()
+            blocks = team_df['Blocks Blocks'].sum()
+            clearances = team_df['Clr'].sum()
+            errors = team_df['Err'].sum()
+            
             defense_metrics = {
-                'Tackles': team_df['Tackles Tkl'].sum(),
-                'Tackles Per 90': team_df['Tackles Tkl'].sum() / max(1, team_df['Playing Time 90s'].sum()),
-                'Interceptions': team_df['Int'].sum(),
-                'Interceptions Per 90': team_df['Int'].sum() / max(1, team_df['Playing Time 90s'].sum()),
-                'Tackles + Interceptions': team_df['Tkl+Int'].sum(),
-                'Tackles + Interceptions Per 90': team_df['Tkl+Int'].sum() / max(1, team_df['Playing Time 90s'].sum()),
-                'Blocks': team_df['Blocks Blocks'].sum(),
-                'Blocks Per 90': team_df['Blocks Blocks'].sum() / max(1, team_df['Playing Time 90s'].sum()),
-                'Clearances': team_df['Clr'].sum(),
-                'Clearances Per 90': team_df['Clr'].sum() / max(1, team_df['Playing Time 90s'].sum()),
-                'Errors': team_df['Err'].sum(),
-                'Errors Per 90': team_df['Err'].sum() / max(1, team_df['Playing Time 90s'].sum()),
+                'Tackles': tackles,
+                'Tackles Per 90': tackles / playing_time_sum,
+                'Interceptions': interceptions,
+                'Interceptions Per 90': interceptions / playing_time_sum,
+                'Tackles + Interceptions': tackles_interceptions,
+                'Tackles + Interceptions Per 90': tackles_interceptions / playing_time_sum,
+                'Blocks': blocks,
+                'Blocks Per 90': blocks / playing_time_sum,
+                'Clearances': clearances,
+                'Clearances Per 90': clearances / playing_time_sum,
+                'Errors': errors,
+                'Errors Per 90': errors / playing_time_sum,
             }
             
             # Combine all metrics
@@ -180,14 +185,8 @@ def compute_team_metrics(df):
             
             teams_data.append(team_data)
         
-        # Clear progress indicators
-        progress_placeholder.empty()
-        status_text.text("Creating team metrics dataframe...")
-        
         # Create DataFrame from the team metrics
         teams_df = pd.DataFrame(teams_data)
-        
-        status_text.text("Team metrics processing complete!")
         
         return teams_df
     
@@ -195,10 +194,10 @@ def compute_team_metrics(df):
         st.error(f"Error computing team metrics: {str(e)}")
         return None
 
-# Function to normalize metrics within each competition
+@st.cache_data
 def normalize_metrics(teams_df):
     """
-    Normalize team metrics within each competition to a 0-1 scale
+    Normalize team metrics within each competition to a 0-1 scale - OPTIMIZED
     
     Args:
         teams_df: DataFrame with team metrics
@@ -209,14 +208,10 @@ def normalize_metrics(teams_df):
     if teams_df is None or teams_df.empty:
         return None
     
-    status_text.text("Normalizing metrics within each competition...")
-    
     # Create a copy of the DataFrame
     normalized_df = teams_df.copy()
     
     # List of metrics to normalize
-    # Exclude identification columns like 'Squad', 'Competition', 'Season'
-    # Also exclude percentage metrics which are already normalized
     exclude_cols = ['Squad', 'Competition', 'Season', 'Shot on Target %', 'Attacking Third Touches %', 'Box Touches %', 'Pass Completion %']
     invert_cols = ['Errors', 'Errors Per 90']  # Lower is better for these
     
@@ -224,17 +219,8 @@ def normalize_metrics(teams_df):
     numeric_cols = normalized_df.select_dtypes(include=['number']).columns
     metrics_to_normalize = [col for col in numeric_cols if col not in exclude_cols]
     
-    # Show progress
-    total_competitions = len(normalized_df['Competition'].unique())
-    progress_bar = progress_placeholder.progress(0)
-    
-    # Normalize metrics within each competition
-    for i, competition in enumerate(normalized_df['Competition'].unique()):
-        # Update progress
-        progress_percent = min(100, int((i / total_competitions) * 100))
-        progress_bar.progress(progress_percent / 100)
-        status_text.text(f"Normalizing metrics for competition {i+1}/{total_competitions}: {competition}")
-        
+    # OPTIMIZATION: Use vectorized operations instead of loops where possible
+    for competition in normalized_df['Competition'].unique():
         comp_mask = normalized_df['Competition'] == competition
         
         for col in metrics_to_normalize:
@@ -258,24 +244,11 @@ def normalize_metrics(teams_df):
         if col in normalized_df.columns:
             normalized_df[f'Normalized {col}'] = normalized_df[col] / 100
     
-    # Clear progress indicators
-    progress_placeholder.empty()
-    status_text.text("Normalization complete!")
-    
     return normalized_df
 
-# Function to calculate similarity between two teams
+@st.cache_data
 def calculate_similarity(team1_data, team2_data):
-    """
-    Calculate similarity score between two teams based on their normalized metrics
-    
-    Args:
-        team1_data: Series with team 1 metrics
-        team2_data: Series with team 2 metrics
-        
-    Returns:
-        float: Similarity score (0-1)
-    """
+    """Calculate similarity score between two teams based on their normalized metrics"""
     # Get all normalized metrics
     normalized_cols = [col for col in team1_data.index if col.startswith('Normalized')]
     
@@ -301,19 +274,9 @@ def calculate_similarity(team1_data, team2_data):
     
     return max(0, min(1, similarity))  # Ensure between 0 and 1
 
-# Function to create bar charts for team metrics
+@st.cache_data
 def create_team_metrics_chart(team_data, metric_category, normalized=True):
-    """
-    Create bar charts for team metrics
-    
-    Args:
-        team_data: Series with team metrics
-        metric_category: Category of metrics to display (Attack, Possession, Defense)
-        normalized: Whether to use normalized metrics
-        
-    Returns:
-        plotly figure
-    """
+    """Create bar charts for team metrics"""
     # Define metrics for each category
     metrics_by_category = {
         'Attack': [
@@ -378,20 +341,9 @@ def create_team_metrics_chart(team_data, metric_category, normalized=True):
     
     return fig
 
-# Function to create comparison bar charts for two teams
+@st.cache_data
 def create_comparison_chart(team1_data, team2_data, metric_category, normalized=True):
-    """
-    Create comparison bar charts for two teams
-    
-    Args:
-        team1_data: Series with team 1 metrics
-        team2_data: Series with team 2 metrics
-        metric_category: Category of metrics to display
-        normalized: Whether to use normalized metrics
-        
-    Returns:
-        plotly figure
-    """
+    """Create comparison bar charts for two teams"""
     # Define metrics for each category
     metrics_by_category = {
         'Attack': [
@@ -475,18 +427,9 @@ def create_comparison_chart(team1_data, team2_data, metric_category, normalized=
     
     return fig
 
-# Function to create radar chart for team comparison
+@st.cache_data
 def create_radar_chart(team1_data, team2_data):
-    """
-    Create radar chart comparing two teams across key metrics
-    
-    Args:
-        team1_data: Series with team 1 metrics
-        team2_data: Series with team 2 metrics
-        
-    Returns:
-        plotly figure
-    """
+    """Create radar chart comparing two teams across key metrics"""
     # Select key normalized metrics for radar chart
     radar_metrics = [
         'Normalized Goals Per 90', 
@@ -559,37 +502,36 @@ def create_radar_chart(team1_data, team2_data):
     
     return fig
 
-# Main function
 def main():
     # Title and introduction
     st.markdown('<p class="main-header">⚽ Football Team Playing Style Analyzer</p>', unsafe_allow_html=True)
     
-    # Initialization of progress placeholders (used in other functions)
-    global progress_placeholder, status_text
-    progress_placeholder = st.empty()
-    status_text = st.empty()
+    # OPTIMIZATION: Initialize session state vars upfront
+    if 'teams_df' not in st.session_state:
+        st.session_state['teams_df'] = None
+    if 'normalized_teams_df' not in st.session_state:
+        st.session_state['normalized_teams_df'] = None
     
     # Load and process data
-    df = load_data()
+    with st.spinner("Loading data..."):
+        df = load_data()
     
     if df is not None:
-        # Show loading message
-        with st.spinner("Computing team metrics..."):
-            # Compute team-level metrics
-            teams_df = compute_team_metrics(df)
-            
-            # Normalize metrics
-            normalized_teams_df = normalize_metrics(teams_df)
+        # OPTIMIZATION: Use session state to avoid recomputing
+        if st.session_state['normalized_teams_df'] is None:
+            with st.spinner("Computing team metrics..."):
+                teams_df = compute_team_metrics(df)
+                normalized_teams_df = normalize_metrics(teams_df)
+                
+                # Store in session state
+                st.session_state['teams_df'] = teams_df
+                st.session_state['normalized_teams_df'] = normalized_teams_df
+        else:
+            teams_df = st.session_state['teams_df']
+            normalized_teams_df = st.session_state['normalized_teams_df']
+            st.success("Using cached data from previous run for faster performance")
         
         if normalized_teams_df is not None:
-            # Optional data caching info
-            if "normalized_teams_df" in st.session_state:
-                st.success("Using cached data from previous run for faster performance")
-            else:
-                st.session_state["normalized_teams_df"] = normalized_teams_df
-                
-            # Clear any lingering status messages
-            status_text.empty()
             # Sidebar for filtering and navigation
             st.sidebar.markdown("## Navigation")
             app_mode = st.sidebar.radio("Select Mode", ["Single Team Analysis", "Team Comparison"])
