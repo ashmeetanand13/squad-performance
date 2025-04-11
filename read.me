@@ -1,0 +1,101 @@
+# Football Team Playing Style Analyzer
+
+A Streamlit application for analyzing and comparing football team playing styles based on performance metrics.
+
+## Features
+
+- **Single Team Analysis**: View detailed metrics for any team in a selected competition
+- **Team Comparison**: Compare two teams from same or different competitions
+- **Normalized Metrics**: All metrics normalized within each competition for fair comparison
+- **Interactive Visualizations**: Bar charts and radar charts to visualize team styles
+- **Key Categories**: Analysis of Attack, Possession, and Defense metrics
+
+## Installation
+
+1. Clone this repository
+2. Install the required packages:
+
+```bash
+pip install -r requirements.txt
+```
+
+The application automatically fetches data from GitHub:
+https://github.com/ashmeetanand13/footy_world/blob/main/df_clean.csv
+
+## Data Requirements
+
+The application expects a CSV file named `df_clean.csv` with player-level statistics. The file should contain the following key columns:
+
+- Player information: `Player`, `Squad`, `Competition`, `Season`, `Pos`
+- Performance metrics: Goals, assists, shots, passes, tackles, etc.
+
+If the data file is not available, the application will use sample data for demonstration purposes.
+
+## Usage
+
+Run the Streamlit application:
+
+```bash
+streamlit run app.py
+```
+
+### Single Team Analysis
+
+1. Select "Single Team Analysis" from the sidebar
+2. Choose a competition and team
+3. Use the tabs to view different metric categories
+4. Toggle between normalized and raw values
+
+### Team Comparison
+
+1. Select "Team Comparison" from the sidebar
+2. Choose two teams (can be from different competitions)
+3. View similarity score and metrics comparison
+4. Use the radar chart for overall style comparison
+
+## Metrics Categories
+
+### Attack Metrics
+- Goals Per 90
+- Shots Per 90
+- Shot on Target %
+- Goals Per Shot
+- xG Per 90
+- G-xG (Goals minus Expected Goals)
+- Key Passes Per 90
+
+### Possession Metrics
+- Touches Per 90
+- Progressive Carries Per 90
+- Progressive Passes Per 90
+- Attacking Third Touches %
+- Box Touches %
+- Pass Completion %
+
+### Defense Metrics
+- Tackles Per 90
+- Interceptions Per 90
+- Tackles + Interceptions Per 90
+- Blocks Per 90
+- Clearances Per 90
+- Errors Per 90
+
+## Normalization
+
+All metrics are normalized within each competition on a 0-1 scale:
+- 0 = Lowest value in the competition
+- 1 = Highest value in the competition
+
+This allows for fair comparison between teams from different competitions with different competitive levels.
+
+## Requirements
+
+- Python 3.7+
+- Streamlit
+- Pandas
+- NumPy
+- Plotly
+
+## License
+
+This project is for educational purposes only.
