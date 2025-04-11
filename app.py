@@ -6,6 +6,7 @@ import plotly.graph_objects as go
 from datetime import datetime
 import requests
 from io import StringIO
+import traceback
 
 # Set page config
 st.set_page_config(
@@ -15,7 +16,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for styling (unchanged)
+# Custom CSS for styling
 st.markdown("""
 <style>
     .main-header {
@@ -77,7 +78,6 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Real data loading function
 @st.cache_data
 def load_real_data():
     """
@@ -86,7 +86,7 @@ def load_real_data():
     Returns:
         DataFrame: Player-level data or None if loading fails
     """
-    # The raw GitHub URL for your data - using the RAW URL format
+    # The raw GitHub URL for your data
     GITHUB_RAW_URL = 'https://raw.githubusercontent.com/ashmeetanand13/squad-performance/main/df_clean.csv'
     
     try:
@@ -101,12 +101,12 @@ def load_real_data():
             
             # Try different parsers and settings
             try:
-                # First try: with default settings but more permissive
+                # First try: with C engine but skip bad lines
                 df = pd.read_csv(
                     content, 
                     low_memory=False,
-                    on_bad_lines='skip',  # Skip bad lines
-                    engine='python'      # Use more flexible python engine
+                    on_bad_lines='skip',
+                    engine='c'  # Use C engine which supports low_memory
                 )
                 if df.shape[0] > 0:
                     st.info(f"Successfully loaded real data, skipping some malformed lines. Shape: {df.shape}")
@@ -120,17 +120,14 @@ def load_real_data():
                 content.seek(0)
                 
                 try:
-                    # Second try: with more flexible parsing and attempt to detect delimiter
+                    # Second try: with Python engine (no low_memory)
                     df = pd.read_csv(
                         content, 
-                        low_memory=False,
                         on_bad_lines='skip',
-                        delimiter=None,         # Try to auto-detect delimiter
-                        engine='python'         # Use more flexible python engine
+                        engine='python'  # Python engine doesn't support low_memory
                     )
                     st.warning("CSV had some formatting issues. Some rows may have been skipped.")
                 except Exception as e2:
-                    # If all attempts fail, fallback to sample data
                     st.error(f"Could not parse CSV file: {str(e2)}")
                     return None
             
@@ -155,7 +152,6 @@ def load_real_data():
         st.error(f"Unexpected error loading data: {str(e)}")
         return None
 
-# Function to process player-level data to team-level metrics
 @st.cache_data
 def compute_team_metrics(df):
     """
@@ -171,83 +167,135 @@ def compute_team_metrics(df):
         return None
     
     try:
-        # Check if data is already at team level
-        if 'Squad' in df.columns and df.shape[0] <= 100:
-            # Probably team-level data already
-            st.info("Data appears to be already at team level")
-            return df
+        # Check if required columns exist
+        required_columns = ['Squad', 'Competition', 'Season']
+        if not all(col in df.columns for col in required_columns):
+            st.warning("Some required columns are missing. Looking for alternative column names...")
             
-        # Group by squad, competition, and season
-        if all(col in df.columns for col in ['Squad', 'Competition', 'Season']):
-            grouped = df.groupby(['Squad', 'Competition', 'Season'])
-        elif all(col in df.columns for col in ['Squad', 'Comp', 'Season']):
-            # Handle different column names
-            grouped = df.groupby(['Squad', 'Comp', 'Season'])
-            df = df.rename(columns={'Comp': 'Competition'})
-        else:
-            st.error("Required columns for grouping not found in data")
+            # Map of possible column names
+            column_mapping = {
+                'Squad': ['Squad', 'Team', 'Club'],
+                'Competition': ['Competition', 'Comp', 'League'],
+                'Season': ['Season', 'Year', 'Season_Year']
+            }
+            
+            # Try to find alternative column names
+            for required, alternatives in column_mapping.items():
+                if required not in df.columns:
+                    for alt in alternatives:
+                        if alt in df.columns:
+                            df = df.rename(columns={alt: required})
+                            st.info(f"Renamed column '{alt}' to '{required}'")
+                            break
+        
+        # Check again if we have all required columns
+        if not all(col in df.columns for col in required_columns):
+            missing = [col for col in required_columns if col not in df.columns]
+            st.error(f"Missing required columns: {missing}")
             return None
+        
+        # Group by team, competition, and season
+        grouped = df.groupby(['Squad', 'Competition', 'Season'])
         
         # Create team metrics dictionary
         teams_data = []
         
-        for name, team_df in grouped:
-            if len(name) == 3:
-                squad, competition, season = name
-            else:
-                squad = name
-                competition = "Unknown"
-                season = "2022-23"
-                
+        # Based on your CSV info, these are some relevant column mappings
+        metric_mappings = {
+            'Goals': ['Performance Gls', 'Standard Gls', 'Performance G-PK'],
+            'xG': ['Expected xG', 'xG'],
+            'Shots': ['Standard Sh'],
+            'Shots on Target': ['Standard SoT'],
+            'Playing Time': ['Playing Time 90s', '90s'],
+            'Touches': ['Touches Touches'],
+            'Progressive Passes': ['PrgP', 'Progression PrgP'],
+            'Progressive Carries': ['Progression PrgC', 'Carries PrgC'],
+            'Tackles': ['Tackles Tkl'],
+            'Interceptions': ['Int'],
+            'Blocks': ['Blocks Blocks', 'Blocks'],
+            'Clearances': ['Clr'],
+            'Key Passes': ['KP'],
+            'Pass Completion': ['Total Cmp%'],
+            'Attacking Third Touches': ['Touches Att 3rd'],
+            'Box Touches': ['Touches Att Pen'],
+            'Errors': ['Err']
+        }
+        
+        # Process each team
+        for (squad, competition, season), team_df in grouped:
+            # Create team data dictionary with identification
             team_data = {
                 'Squad': squad,
                 'Competition': competition,
                 'Season': season
             }
             
-            # Detect columns for different metrics
-            # This is flexible to handle different column naming schemes
+            # For each metric, try to find and sum the corresponding column
+            for metric, possible_columns in metric_mappings.items():
+                for col in possible_columns:
+                    if col in team_df.columns:
+                        # For percentage columns, take weighted average
+                        if 'Cmp%' in col:
+                            # Find the corresponding attempts column
+                            att_col = col.replace('Cmp%', 'Att')
+                            if att_col in team_df.columns:
+                                completions = (team_df[col] * team_df[att_col]).sum()
+                                attempts = team_df[att_col].sum()
+                                team_data[f'Pass Completion %'] = 100 * completions / max(1, attempts)
+                        # For regular columns, sum the values
+                        else:
+                            team_data[metric] = team_df[col].sum()
+                        break
             
-            # Attack metrics
-            goals_cols = [col for col in team_df.columns if 'Goal' in col or 'Gls' in col]
-            shots_cols = [col for col in team_df.columns if 'Shot' in col or 'Sh' in col]
-            xg_cols = [col for col in team_df.columns if 'xG' in col]
+            # Calculate per 90 metrics
+            playing_time = 0
+            for time_col in ['Playing Time 90s', '90s']:
+                if time_col in team_df.columns:
+                    playing_time = team_df[time_col].sum()
+                    break
             
-            # Time metrics
-            time_cols = [col for col in team_df.columns if '90' in col or 'Min' in col]
+            if playing_time > 0:
+                # Create per 90 metrics
+                for base_metric, per90_metric in [
+                    ('Goals', 'Goals Per 90'),
+                    ('xG', 'xG Per 90'),
+                    ('Shots', 'Shots Per 90'),
+                    ('Key Passes', 'Key Passes Per 90'),
+                    ('Touches', 'Touches Per 90'),
+                    ('Progressive Passes', 'Progressive Passes Per 90'),
+                    ('Progressive Carries', 'Progressive Carries Per 90'),
+                    ('Tackles', 'Tackles Per 90'),
+                    ('Interceptions', 'Interceptions Per 90'),
+                    ('Blocks', 'Blocks Per 90'),
+                    ('Clearances', 'Clearances Per 90'),
+                    ('Errors', 'Errors Per 90')
+                ]:
+                    if base_metric in team_data:
+                        team_data[per90_metric] = team_data[base_metric] / playing_time
             
-            # Calculate basic metrics where possible
-            # Goals
-            if goals_cols:
-                goals_col = goals_cols[0]
-                team_data['Goals'] = team_df[goals_col].sum()
+            # Calculate percentages
+            if 'Shots' in team_data and 'Shots on Target' in team_data and team_data['Shots'] > 0:
+                team_data['Shot on Target %'] = 100 * team_data['Shots on Target'] / team_data['Shots']
             
-            # Shots
-            if shots_cols:
-                shots_col = shots_cols[0]
-                team_data['Shots'] = team_df[shots_col].sum()
+            if 'Goals' in team_data and 'Shots' in team_data and team_data['Shots'] > 0:
+                team_data['Goals Per Shot'] = team_data['Goals'] / team_data['Shots']
             
-            # xG
-            if xg_cols:
-                xg_col = xg_cols[0]
-                team_data['xG'] = team_df[xg_col].sum()
+            if 'Attacking Third Touches' in team_data and 'Touches' in team_data and team_data['Touches'] > 0:
+                team_data['Attacking Third Touches %'] = 100 * team_data['Attacking Third Touches'] / team_data['Touches']
             
-            # Playing time
-            if time_cols:
-                time_col = time_cols[0]
-                team_data['Playing Time 90s'] = team_df[time_col].sum()
-                
-                # Per 90 metrics
-                if 'Goals' in team_data:
-                    team_data['Goals Per 90'] = team_data['Goals'] / max(1, team_data['Playing Time 90s'])
-                
-                if 'Shots' in team_data:
-                    team_data['Shots Per 90'] = team_data['Shots'] / max(1, team_data['Playing Time 90s'])
-                
-                if 'xG' in team_data:
-                    team_data['xG Per 90'] = team_data['xG'] / max(1, team_data['Playing Time 90s'])
+            if 'Box Touches' in team_data and 'Touches' in team_data and team_data['Touches'] > 0:
+                team_data['Box Touches %'] = 100 * team_data['Box Touches'] / team_data['Touches']
             
-            # Add any other metrics that can be calculated
+            # Calculate derived metrics
+            if 'Goals' in team_data and 'xG' in team_data:
+                team_data['G-xG'] = team_data['Goals'] - team_data['xG']
+            
+            if 'Tackles' in team_data and 'Interceptions' in team_data:
+                team_data['Tackles + Interceptions'] = team_data['Tackles'] + team_data['Interceptions']
+                if playing_time > 0:
+                    team_data['Tackles + Interceptions Per 90'] = team_data['Tackles + Interceptions'] / playing_time
+            
+            # Add team data to list
             teams_data.append(team_data)
         
         # Create DataFrame from the team metrics
@@ -259,9 +307,10 @@ def compute_team_metrics(df):
     
     except Exception as e:
         st.error(f"Error computing team metrics: {str(e)}")
+        st.error(traceback.format_exc())
         return None
 
-# Sample data function (unchanged)
+# Sample data generation
 @st.cache_data
 def load_sample_data():
     """
@@ -364,7 +413,6 @@ def load_sample_data():
     st.success("Using sample data with 50 teams across 5 major leagues")
     return normalized_teams_df
 
-# Combined function to load either real or sample data
 @st.cache_data
 def load_and_process_data():
     """
@@ -399,7 +447,6 @@ def load_and_process_data():
         st.warning("Using sample data because real data could not be loaded")
         return load_sample_data()
 
-# The remaining functions are unchanged
 @st.cache_data
 def calculate_similarity(team1_data, team2_data):
     """Calculate similarity score between two teams based on their normalized metrics"""
@@ -683,21 +730,31 @@ def normalize_metrics(teams_df):
         comp_mask = normalized_df['Competition'] == competition
         
         for col in metrics_to_normalize:
-            col_min = normalized_df.loc[comp_mask, col].min()
-            col_max = normalized_df.loc[comp_mask, col].max()
+            # Skip if column doesn't exist
+            if col not in normalized_df.columns:
+                continue
+                
+            col_values = normalized_df.loc[comp_mask, col]
+            
+            # Skip if no valid values or all values are the same
+            if col_values.isna().all() or col_values.nunique() <= 1:
+                normalized_df.loc[comp_mask, f'Normalized {col}'] = 0.5
+                continue
+                
+            col_min = col_values.min()
+            col_max = col_values.max()
             
             # Skip if min equals max (no variation)
             if col_max > col_min:
                 if col in invert_cols:
                     # For metrics where lower is better
                     normalized_df.loc[comp_mask, f'Normalized {col}'] = 1 - (normalized_df.loc[comp_mask, col] - col_min) / (col_max - col_min)
-                else:
+                  else:
                     # For metrics where higher is better
                     normalized_df.loc[comp_mask, f'Normalized {col}'] = (normalized_df.loc[comp_mask, col] - col_min) / (col_max - col_min)
-            else:
+           else:
                 # If all values are the same, set normalized value to 0.5
                 normalized_df.loc[comp_mask, f'Normalized {col}'] = 0.5
-    
     # For percentage metrics, divide by 100 to get 0-1 scale
     for col in ['Shot on Target %', 'Attacking Third Touches %', 'Box Touches %', 'Pass Completion %']:
         if col in normalized_df.columns:
