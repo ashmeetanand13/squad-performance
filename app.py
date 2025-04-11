@@ -749,14 +749,13 @@ def normalize_metrics(teams_df):
                 if col in invert_cols:
                     # For metrics where lower is better
                     normalized_df.loc[comp_mask, f'Normalized {col}'] = 1 - (normalized_df.loc[comp_mask, col] - col_min) / (col_max - col_min)
-                    
                 else:
                     # For metrics where higher is better
                     normalized_df.loc[comp_mask, f'Normalized {col}'] = (normalized_df.loc[comp_mask, col] - col_min) / (col_max - col_min)
-                    
-             else:
+            else:
                 # If all values are the same, set normalized value to 0.5
                 normalized_df.loc[comp_mask, f'Normalized {col}'] = 0.5
+    
     # For percentage metrics, divide by 100 to get 0-1 scale
     for col in ['Shot on Target %', 'Attacking Third Touches %', 'Box Touches %', 'Pass Completion %']:
         if col in normalized_df.columns:
