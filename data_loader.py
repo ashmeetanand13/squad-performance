@@ -13,7 +13,7 @@ def load_data():
     """
     # The raw GitHub URL for your data - update this to use the raw URL
     # The format should be: https://raw.githubusercontent.com/username/repo/branch/file.csv
-    GITHUB_RAW_URL = "https://raw.githubusercontent.com/ashmeetanand13/squad-performance/main/df_clean.csv"
+    GITHUB_RAW_URL = 'https://raw.githubusercontent.com/ashmeetanand13/squad-performance/main/df_clean.csv'
     
     try:
         # Show loading status
