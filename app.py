@@ -215,8 +215,6 @@ def compute_team_metrics(df):
         st.error(traceback.format_exc())
         return None
 
-
-
 @st.cache_data
 def load_and_process_data():
     """Load and process the football data"""
@@ -284,15 +282,39 @@ def normalize_metrics(teams_df):
     return normalized_df
 
 @st.cache_data
-def calculate_similarity(team1_data, team2_data):
+def calculate_similarity(team1_data, team2_data, metric_category=None):
     """Calculate similarity score between two teams"""
-    normalized_cols = [col for col in team1_data.index if col.startswith('Normalized')]
+    # Define metrics for each category
+    metrics_by_category = {
+        'Attack': [
+            'Goals', 'Goals Per 90', 'Shots', 'Shots Per 90', 'Shot on Target %', 
+            'Goals Per Shot', 'xG', 'xG Per 90', 'G-xG', 'Key Passes', 'Key Passes Per 90'
+        ],
+        'Possession': [
+            'Touches', 'Touches Per 90', 'Progressive Carries', 'Progressive Carries Per 90',
+            'Progressive Passes', 'Progressive Passes Per 90', 'Attacking Third Touches %', 
+            'Box Touches %', 'Pass Completion %'
+        ],
+        'Defense': [
+            'Tackles', 'Tackles Per 90', 'Interceptions', 'Interceptions Per 90',
+            'Tackles + Interceptions', 'Tackles + Interceptions Per 90', 'Blocks', 
+            'Blocks Per 90', 'Clearances', 'Clearances Per 90', 'Errors', 'Errors Per 90'
+        ]
+    }
+    
+    # Get normalized columns based on category
+    if metric_category and metric_category in metrics_by_category:
+        base_metrics = metrics_by_category[metric_category]
+        normalized_cols = [f'Normalized {m}' for m in base_metrics]
+    else:
+        # Use all normalized columns if no category specified
+        normalized_cols = [col for col in team1_data.index if col.startswith('Normalized')]
     
     squared_diff_sum = 0
     valid_metrics = 0
     
     for col in normalized_cols:
-        if col in team1_data and col in team2_data:
+        if col in team1_data.index and col in team2_data.index:
             val1 = team1_data[col]
             val2 = team2_data[col]
             
@@ -343,27 +365,54 @@ def create_team_metrics_chart(team_data, available_metrics, normalized=True):
     
     return fig
 
-def create_comparison_chart(team1_data, team2_data, available_metrics, normalized=True):
-    """Create comparison bar charts for two teams"""
+def create_comparison_chart(team1_data, team2_data, metric_category, normalized=True):
+    """Create comparison bar charts for two teams based on category"""
+    # Define metrics for each category
+    metrics_by_category = {
+        'Attack': [
+            'Goals', 'Goals Per 90', 'Shots', 'Shots Per 90', 'Shot on Target %', 
+            'Goals Per Shot', 'xG', 'xG Per 90', 'G-xG', 'Key Passes', 'Key Passes Per 90'
+        ],
+        'Possession': [
+            'Touches', 'Touches Per 90', 'Progressive Carries', 'Progressive Carries Per 90',
+            'Progressive Passes', 'Progressive Passes Per 90', 'Attacking Third Touches %', 
+            'Box Touches %', 'Pass Completion %'
+        ],
+        'Defense': [
+            'Tackles', 'Tackles Per 90', 'Interceptions', 'Interceptions Per 90',
+            'Tackles + Interceptions', 'Tackles + Interceptions Per 90', 'Blocks', 
+            'Blocks Per 90', 'Clearances', 'Clearances Per 90', 'Errors', 'Errors Per 90'
+        ]
+    }
+    
+    # Get metrics for the selected category
+    selected_metrics = metrics_by_category.get(metric_category, [])
+    
     if normalized:
-        metric_cols = [f'Normalized {m}' for m in available_metrics if 
-                      f'Normalized {m}' in team1_data.index and f'Normalized {m}' in team2_data.index]
+        # Use normalized metrics
+        selected_metrics = [f'Normalized {m}' for m in selected_metrics]
         y_range = [0, 1]
         title_suffix = "Normalized (0-1 scale)"
     else:
-        metric_cols = [m for m in available_metrics if m in team1_data.index and m in team2_data.index]
+        # Use raw metrics
         y_range = None
         title_suffix = "Raw Values"
     
-    if not metric_cols:
+    # Filter metrics that exist in both datasets
+    available_metrics = [m for m in selected_metrics if m in team1_data.index and m in team2_data.index]
+    
+    if not available_metrics:
         return None
     
-    values1 = team1_data[metric_cols]
-    values2 = team2_data[metric_cols]
-    labels = [m.replace('Normalized ', '') for m in metric_cols]
+    # Extract values
+    values1 = team1_data[available_metrics]
+    values2 = team2_data[available_metrics]
+    labels = [m.replace('Normalized ', '') for m in available_metrics]
     
+    # Create bar chart
     fig = go.Figure()
     
+    # Add bars for team 1
     fig.add_trace(go.Bar(
         x=labels,
         y=values1,
@@ -373,6 +422,7 @@ def create_comparison_chart(team1_data, team2_data, available_metrics, normalize
         textposition='auto',
     ))
     
+    # Add bars for team 2
     fig.add_trace(go.Bar(
         x=labels,
         y=values2,
@@ -382,15 +432,95 @@ def create_comparison_chart(team1_data, team2_data, available_metrics, normalize
         textposition='auto',
     ))
     
+    # Update layout
     fig.update_layout(
-        title=f"Team Comparison - {title_suffix}",
+        title=f"{metric_category} Metrics Comparison - {title_suffix}",
         xaxis_title="Metric",
         yaxis_title="Value",
         barmode='group',
         height=500,
         yaxis=dict(range=y_range),
         template="plotly_white",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1
+        )
+    )
+    
+    return fig
+
+def create_radar_chart(team1_data, team2_data):
+    """Create radar chart comparing two teams across key metrics"""
+    # Select key normalized metrics for radar chart - balanced across categories
+    radar_metrics = [
+        'Normalized Goals Per 90',
+        'Normalized xG Per 90',
+        'Normalized Shots Per 90',
+        'Normalized Key Passes Per 90',
+        'Normalized Touches Per 90',
+        'Normalized Progressive Passes Per 90',
+        'Normalized Pass Completion %',
+        'Normalized Tackles Per 90',
+        'Normalized Interceptions Per 90',
+        'Normalized Blocks Per 90'
+    ]
+    
+    # Filter metrics that exist in both datasets
+    available_metrics = [m for m in radar_metrics if m in team1_data.index and m in team2_data.index]
+    
+    if len(available_metrics) < 3:  # Need at least 3 metrics for a meaningful radar chart
+        return None
+    
+    # Extract values
+    values1 = team1_data[available_metrics].values
+    values2 = team2_data[available_metrics].values
+    labels = [m.replace('Normalized ', '') for m in available_metrics]
+    
+    # Create radar chart
+    fig = go.Figure()
+    
+    # Add radar for team 1
+    fig.add_trace(go.Scatterpolar(
+        r=values1,
+        theta=labels,
+        fill='toself',
+        name=team1_data['Squad'],
+        line_color='#1E3A8A',
+        fillcolor='rgba(30, 58, 138, 0.3)'
+    ))
+    
+    # Add radar for team 2
+    fig.add_trace(go.Scatterpolar(
+        r=values2,
+        theta=labels,
+        fill='toself',
+        name=team2_data['Squad'],
+        line_color='#DC2626',
+        fillcolor='rgba(220, 38, 38, 0.3)'
+    ))
+    
+    # Update layout
+    fig.update_layout(
+        title="Team Playing Style Overview",
+        polar=dict(
+            radialaxis=dict(
+                visible=True,
+                range=[0, 1]
+            )
+        ),
+        showlegend=True,
+        height=600,
+        template="plotly_white",
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1
+        )
     )
     
     return fig
@@ -448,29 +578,45 @@ def main():
                     
                     show_normalized = st.checkbox("Show Normalized Values", value=True)
                     
-                    # Display available metrics
-                    team_metrics = [col for col in all_metrics if col in team_data.index and pd.notna(team_data[col])]
+                    # Display team metrics in tabs
+                    tabs = st.tabs(["Attack", "Possession", "Defense"])
                     
-                    if team_metrics:
-                        chart = create_team_metrics_chart(team_data, team_metrics, normalized=show_normalized)
-                        if chart:
-                            st.plotly_chart(chart, use_container_width=True)
-                        
-                        # Show metrics table
-                        st.markdown("### Team Metrics")
-                        metrics_data = []
-                        for metric in team_metrics[:15]:  # Show top 15 metrics
-                            if metric in team_data.index:
-                                metrics_data.append({
-                                    'Metric': metric,
-                                    'Value': f"{team_data[metric]:.2f}"
-                                })
-                        
-                        if metrics_data:
-                            metrics_df = pd.DataFrame(metrics_data)
-                            st.dataframe(metrics_df, use_container_width=True)
-                    else:
-                        st.warning("No metrics available for this team.")
+                    # Define metrics for each category
+                    attack_metrics = [m for m in all_metrics if any(keyword in m.lower() for keyword in 
+                                     ['goal', 'shot', 'xg', 'key pass', 'assist', 'chance'])]
+                    
+                    possession_metrics = [m for m in all_metrics if any(keyword in m.lower() for keyword in 
+                                         ['touch', 'pass', 'carry', 'progression', 'completion', 'third'])]
+                    
+                    defense_metrics = [m for m in all_metrics if any(keyword in m.lower() for keyword in 
+                                      ['tackle', 'interception', 'block', 'clearance', 'error', 'foul'])]
+                    
+                    # Attack tab
+                    with tabs[0]:
+                        if attack_metrics:
+                            chart = create_team_metrics_chart(team_data, attack_metrics, normalized=show_normalized)
+                            if chart:
+                                st.plotly_chart(chart, use_container_width=True)
+                        else:
+                            st.warning("No attack metrics available for this team.")
+                    
+                    # Possession tab
+                    with tabs[1]:
+                        if possession_metrics:
+                            chart = create_team_metrics_chart(team_data, possession_metrics, normalized=show_normalized)
+                            if chart:
+                                st.plotly_chart(chart, use_container_width=True)
+                        else:
+                            st.warning("No possession metrics available for this team.")
+                    
+                    # Defense tab
+                    with tabs[2]:
+                        if defense_metrics:
+                            chart = create_team_metrics_chart(team_data, defense_metrics, normalized=show_normalized)
+                            if chart:
+                                st.plotly_chart(chart, use_container_width=True)
+                        else:
+                            st.warning("No defense metrics available for this team.")
                 else:
                     st.warning("No data available for the selected team.")
         
@@ -512,36 +658,85 @@ def main():
                     team1_data = filtered_df1[team1_mask].iloc[0]
                     team2_data = filtered_df2[team2_mask].iloc[0]
                     
-                    # Calculate similarity
-                    similarity = calculate_similarity(team1_data, team2_data)
-                    
-                    st.markdown(
-                        f"""
-                        <div class="similarity-circle">
-                            <div class="similarity-value">{similarity*100:.1f}%</div>
-                            <div class="similarity-label">Similarity</div>
-                        </div>
-                        """, 
-                        unsafe_allow_html=True
-                    )
-                    
                     show_normalized = st.checkbox("Show Normalized Values", value=True)
                     
-                    # Get common metrics
-                    common_metrics = [col for col in all_metrics if 
-                                    col in team1_data.index and col in team2_data.index and 
-                                    pd.notna(team1_data[col]) and pd.notna(team2_data[col])]
+                    # Display comparison in tabs
+                    tabs = st.tabs(["Overview", "Attack", "Possession", "Defense"])
                     
-                    if common_metrics:
-                        chart = create_comparison_chart(team1_data, team2_data, common_metrics, normalized=show_normalized)
-                        if chart:
-                            st.plotly_chart(chart, use_container_width=True)
+                    # Overview tab
+                    with tabs[0]:
+                        # Calculate overall similarity
+                        overall_similarity = calculate_similarity(team1_data, team2_data)
                         
-                        # Comparison table
-                        st.markdown("### Key Metrics Comparison")
-                        comparison_data = []
+                        st.markdown(
+                            f"""
+                            <div class="similarity-circle">
+                                <div class="similarity-value">{overall_similarity*100:.1f}%</div>
+                                <div class="similarity-label">Overall Similarity</div>
+                            </div>
+                            """, 
+                            unsafe_allow_html=True
+                        )
                         
-                        for metric in common_metrics[:10]:  # Show top 10 metrics
+                        # Show radar chart
+                        radar_chart = create_radar_chart(team1_data, team2_data)
+                        if radar_chart:
+                            st.plotly_chart(radar_chart, use_container_width=True)
+                        
+                        # Show category-specific similarities
+                        col1, col2, col3 = st.columns(3)
+                        
+                        with col1:
+                            attack_sim = calculate_similarity(team1_data, team2_data, 'Attack')
+                            st.metric("Attack Similarity", f"{attack_sim*100:.1f}%")
+                        
+                        with col2:
+                            possession_sim = calculate_similarity(team1_data, team2_data, 'Possession')
+                            st.metric("Possession Similarity", f"{possession_sim*100:.1f}%")
+                        
+                        with col3:
+                            defense_sim = calculate_similarity(team1_data, team2_data, 'Defense')
+                            st.metric("Defense Similarity", f"{defense_sim*100:.1f}%")
+                    
+                    # Attack tab
+                    with tabs[1]:
+                        attack_chart = create_comparison_chart(team1_data, team2_data, "Attack", normalized=show_normalized)
+                        if attack_chart:
+                            st.plotly_chart(attack_chart, use_container_width=True)
+                        else:
+                            st.warning("No comparable attack metrics available for these teams.")
+                    
+                    # Possession tab
+                    with tabs[2]:
+                        possession_chart = create_comparison_chart(team1_data, team2_data, "Possession", normalized=show_normalized)
+                        if possession_chart:
+                            st.plotly_chart(possession_chart, use_container_width=True)
+                        else:
+                            st.warning("No comparable possession metrics available for these teams.")
+                    
+                    # Defense tab
+                    with tabs[3]:
+                        defense_chart = create_comparison_chart(team1_data, team2_data, "Defense", normalized=show_normalized)
+                        if defense_chart:
+                            st.plotly_chart(defense_chart, use_container_width=True)
+                        else:
+                            st.warning("No comparable defense metrics available for these teams.")
+                    
+                    # Key metrics comparison table
+                    st.markdown("### Key Metrics Comparison")
+                    
+                    # Create filtered comparison based on available metrics
+                    comparison_data = []
+                    key_display_metrics = [
+                        'Goals', 'Goals Per 90', 'xG', 'G-xG',
+                        'Shots Per 90', 'Shot on Target %',
+                        'Touches Per 90', 'Pass Completion %',
+                        'Progressive Passes Per 90', 'Progressive Carries Per 90',
+                        'Tackles + Interceptions Per 90'
+                    ]
+                    
+                    for metric in key_display_metrics:
+                        if metric in team1_data.index and metric in team2_data.index:
                             val1 = team1_data[metric]
                             val2 = team2_data[metric]
                             
@@ -551,12 +746,12 @@ def main():
                                 f'{team2}': f"{val2:.2f}",
                                 'Difference': f"{val1 - val2:.2f}"
                             })
-                        
-                        if comparison_data:
-                            comparison_df = pd.DataFrame(comparison_data)
-                            st.dataframe(comparison_df, use_container_width=True)
+                    
+                    if comparison_data:
+                        comparison_df = pd.DataFrame(comparison_data)
+                        st.dataframe(comparison_df, use_container_width=True)
                     else:
-                        st.warning("No common metrics available for comparison.")
+                        st.warning("No comparable metrics available for these teams.")
                 else:
                     st.warning("Data missing for one or both selected teams.")
         
@@ -565,10 +760,21 @@ def main():
         st.markdown('<p class="sub-header">How to Use This Dashboard</p>', unsafe_allow_html=True)
         st.markdown("""
         ### Features:
-        - **Single Team Analysis**: View individual team performance metrics
-        - **Team Comparison**: Compare two teams side-by-side with similarity scoring
-        - **Normalized Values**: All metrics scaled 0-1 within each competition for fair comparison
-        - **Dynamic Data**: Automatically adapts to available metrics in your dataset
+        - **Single Team Analysis**: View individual team performance metrics organized by Attack, Possession, and Defense
+        - **Team Comparison**: Compare two teams side-by-side with:
+          - Overall similarity scoring
+          - Category-specific similarity scores (Attack, Possession, Defense)
+          - Detailed metric comparisons within each category
+          - Radar chart visualization showing playing style overview
+        
+        ### Metrics Categories:
+        - **Attack**: Goals, shots, xG, key passes, and other offensive metrics
+        - **Possession**: Ball touches, passes, progressive actions, and retention metrics
+        - **Defense**: Tackles, interceptions, blocks, clearances, and defensive actions
+        
+        ### Normalized Values:
+        - All metrics are scaled 0-1 within each competition for fair comparison
+        - Toggle between normalized and raw values using the checkbox
         
         ### Data Requirements:
         The app loads real football data from your GitHub repository. Ensure your CSV contains:
