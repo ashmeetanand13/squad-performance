@@ -284,43 +284,60 @@ def normalize_metrics(teams_df):
 @st.cache_data
 def calculate_similarity(team1_data, team2_data, metric_category=None):
     """Calculate similarity score between two teams"""
-    # Define metrics for each category
-    metrics_by_category = {
-        'Attack': [
-            'Goals', 'Goals Per 90', 'Shots', 'Shots Per 90', 'Shot on Target %', 
-            'Goals Per Shot', 'xG', 'xG Per 90', 'G-xG', 'Key Passes', 'Key Passes Per 90'
-        ],
-        'Possession': [
-            'Touches', 'Touches Per 90', 'Progressive Carries', 'Progressive Carries Per 90',
-            'Progressive Passes', 'Progressive Passes Per 90', 'Attacking Third Touches %', 
-            'Box Touches %', 'Pass Completion %'
-        ],
-        'Defense': [
-            'Tackles', 'Tackles Per 90', 'Interceptions', 'Interceptions Per 90',
-            'Tackles + Interceptions', 'Tackles + Interceptions Per 90', 'Blocks', 
-            'Blocks Per 90', 'Clearances', 'Clearances Per 90', 'Errors', 'Errors Per 90'
-        ]
-    }
+    # Get all available normalized columns
+    all_normalized_cols = [col for col in team1_data.index if col.startswith('Normalized') and col in team2_data.index]
     
-    # Get normalized columns based on category
-    if metric_category and metric_category in metrics_by_category:
-        base_metrics = metrics_by_category[metric_category]
-        normalized_cols = [f'Normalized {m}' for m in base_metrics]
+    if metric_category:
+        # Define keywords for each category based on actual column names
+        category_keywords = {
+            'Attack': ['gls', 'goals', 'shot', 'sh/', 'sot', 'g+a', 'pk', 'xg', 'g-xg', 
+                      'ast', 'assist', 'sca', 'gca', 'key pass', 'kp', 'crs', 'cross',
+                      'g/sh', 'g/sot', 'npxg', 'xa', 'xag'],
+            'Possession': ['touch', 'pass', 'cmp', 'att', 'prgp', 'prgr', 'prgc', 
+                          'carry', 'carries', 'dis', 'totdist', 'prgdist', 'mid 3rd', 
+                          'att 3rd', 'def 3rd', 'ppa', 'cpa', 'live', 'dead', 
+                          'short', 'medium', 'long', 'tb', 'sw', 'ti', 'ck'],
+            'Defense': ['tkl', 'tackle', 'int', 'interception', 'block', 'clr', 'clear',
+                       'err', 'error', 'foul', 'fls', 'fld', 'duel', 'aerial', 
+                       'def 3rd', 'mid 3rd', 'att 3rd', 'tkl%', 'tkl+int', 'tklw',
+                       'challenge', 'recov', 'def pen']
+        }
+        
+        # Filter columns based on category keywords
+        keywords = category_keywords.get(metric_category, [])
+        normalized_cols = []
+        
+        for col in all_normalized_cols:
+            col_lower = col.lower()
+            # Check if any keyword is in the column name
+            if any(keyword in col_lower for keyword in keywords):
+                # Exclude certain columns that might match but belong to other categories
+                exclude_keywords = {
+                    'Attack': ['def', 'tkl', 'int', 'block', 'clr'],
+                    'Possession': ['gls', 'shot', 'g+a', 'xg', 'tkl', 'int', 'block'],
+                    'Defense': ['gls', 'shot', 'g+a', 'xg', 'pass', 'cmp', 'touch']
+                }
+                
+                exclude = exclude_keywords.get(metric_category, [])
+                if not any(ex in col_lower for ex in exclude):
+                    normalized_cols.append(col)
     else:
         # Use all normalized columns if no category specified
-        normalized_cols = [col for col in team1_data.index if col.startswith('Normalized')]
+        normalized_cols = all_normalized_cols
+    
+    if not normalized_cols:
+        return 0
     
     squared_diff_sum = 0
     valid_metrics = 0
     
     for col in normalized_cols:
-        if col in team1_data.index and col in team2_data.index:
-            val1 = team1_data[col]
-            val2 = team2_data[col]
-            
-            if pd.notna(val1) and pd.notna(val2):
-                squared_diff_sum += (val1 - val2) ** 2
-                valid_metrics += 1
+        val1 = team1_data[col]
+        val2 = team2_data[col]
+        
+        if pd.notna(val1) and pd.notna(val2):
+            squared_diff_sum += (val1 - val2) ** 2
+            valid_metrics += 1
     
     if valid_metrics == 0:
         return 0
@@ -360,54 +377,88 @@ def create_team_metrics_chart(team_data, available_metrics, normalized=True):
         yaxis_title="Value",
         height=400,
         yaxis=dict(range=y_range),
-        template="plotly_white"
+        template="plotly_white",
+        xaxis_tickangle=-45
     )
     
     return fig
 
 def create_comparison_chart(team1_data, team2_data, metric_category, normalized=True):
     """Create comparison bar charts for two teams based on category"""
-    # Define metrics for each category
-    metrics_by_category = {
-        'Attack': [
-            'Goals', 'Goals Per 90', 'Shots', 'Shots Per 90', 'Shot on Target %', 
-            'Goals Per Shot', 'xG', 'xG Per 90', 'G-xG', 'Key Passes', 'Key Passes Per 90'
-        ],
-        'Possession': [
-            'Touches', 'Touches Per 90', 'Progressive Carries', 'Progressive Carries Per 90',
-            'Progressive Passes', 'Progressive Passes Per 90', 'Attacking Third Touches %', 
-            'Box Touches %', 'Pass Completion %'
-        ],
-        'Defense': [
-            'Tackles', 'Tackles Per 90', 'Interceptions', 'Interceptions Per 90',
-            'Tackles + Interceptions', 'Tackles + Interceptions Per 90', 'Blocks', 
-            'Blocks Per 90', 'Clearances', 'Clearances Per 90', 'Errors', 'Errors Per 90'
-        ]
+    # Get all available columns
+    all_cols = [col for col in team1_data.index if col in team2_data.index]
+    
+    # Define keywords for each category based on actual column names
+    category_keywords = {
+        'Attack': ['gls', 'goals', 'shot', 'sh/', 'sot', 'g+a', 'pk', 'xg', 'g-xg', 
+                  'ast', 'assist', 'sca', 'gca', 'key pass', 'kp', 'crs', 'cross',
+                  'g/sh', 'g/sot', 'npxg', 'xa', 'xag'],
+        'Possession': ['touch', 'pass', 'cmp', 'att', 'prgp', 'prgr', 'prgc', 
+                      'carry', 'carries', 'dis', 'totdist', 'prgdist', 'mid 3rd', 
+                      'att 3rd', 'ppa', 'cpa', 'live', 'dead', 
+                      'short', 'medium', 'long', 'tb', 'sw', 'ti', 'ck'],
+        'Defense': ['tkl', 'tackle', 'int', 'interception', 'block', 'clr', 'clear',
+                   'err', 'error', 'foul', 'fls', 'fld', 'duel', 'aerial', 
+                   'def 3rd', 'tkl%', 'tkl+int', 'tklw',
+                   'challenge', 'recov']
     }
     
     # Get metrics for the selected category
-    selected_metrics = metrics_by_category.get(metric_category, [])
+    keywords = category_keywords.get(metric_category, [])
     
     if normalized:
         # Use normalized metrics
-        selected_metrics = [f'Normalized {m}' for m in selected_metrics]
+        prefix = 'Normalized '
+        selected_metrics = []
+        for col in all_cols:
+            if col.startswith(prefix):
+                col_lower = col.lower()
+                if any(keyword in col_lower for keyword in keywords):
+                    # Exclude certain columns that might match but belong to other categories
+                    exclude_keywords = {
+                        'Attack': ['def', 'tkl', 'int', 'block', 'clr'],
+                        'Possession': ['gls', 'shot', 'g+a', 'xg', 'tkl', 'int', 'block'],
+                        'Defense': ['gls', 'shot', 'g+a', 'xg', 'pass', 'cmp']
+                    }
+                    
+                    exclude = exclude_keywords.get(metric_category, [])
+                    if not any(ex in col_lower for ex in exclude):
+                        selected_metrics.append(col)
+        
         y_range = [0, 1]
         title_suffix = "Normalized (0-1 scale)"
     else:
         # Use raw metrics
+        selected_metrics = []
+        for col in all_cols:
+            if not col.startswith('Normalized'):
+                col_lower = col.lower()
+                if any(keyword in col_lower for keyword in keywords):
+                    # Exclude certain columns that might match but belong to other categories
+                    exclude_keywords = {
+                        'Attack': ['def', 'tkl', 'int', 'block', 'clr'],
+                        'Possession': ['gls', 'shot', 'g+a', 'xg', 'tkl', 'int', 'block'],
+                        'Defense': ['gls', 'shot', 'g+a', 'xg', 'pass', 'cmp']
+                    }
+                    
+                    exclude = exclude_keywords.get(metric_category, [])
+                    if not any(ex in col_lower for ex in exclude):
+                        selected_metrics.append(col)
+        
         y_range = None
         title_suffix = "Raw Values"
     
-    # Filter metrics that exist in both datasets
-    available_metrics = [m for m in selected_metrics if m in team1_data.index and m in team2_data.index]
+    # Limit to top 10 most relevant metrics for clarity
+    if len(selected_metrics) > 10:
+        selected_metrics = selected_metrics[:10]
     
-    if not available_metrics:
+    if not selected_metrics:
         return None
     
     # Extract values
-    values1 = team1_data[available_metrics]
-    values2 = team2_data[available_metrics]
-    labels = [m.replace('Normalized ', '') for m in available_metrics]
+    values1 = team1_data[selected_metrics]
+    values2 = team2_data[selected_metrics]
+    labels = [m.replace('Normalized ', '') for m in selected_metrics]
     
     # Create bar chart
     fig = go.Figure()
@@ -447,29 +498,37 @@ def create_comparison_chart(team1_data, team2_data, metric_category, normalized=
             y=1.02,
             xanchor="right",
             x=1
-        )
+        ),
+        xaxis_tickangle=-45
     )
     
     return fig
 
 def create_radar_chart(team1_data, team2_data):
     """Create radar chart comparing two teams across key metrics"""
-    # Select key normalized metrics for radar chart - balanced across categories
-    radar_metrics = [
-        'Normalized Goals Per 90',
-        'Normalized xG Per 90',
-        'Normalized Shots Per 90',
-        'Normalized Key Passes Per 90',
-        'Normalized Touches Per 90',
-        'Normalized Progressive Passes Per 90',
-        'Normalized Pass Completion %',
-        'Normalized Tackles Per 90',
-        'Normalized Interceptions Per 90',
-        'Normalized Blocks Per 90'
-    ]
+    # Select key normalized metrics based on actual column names
+    # Try to get a balanced set across categories
+    attack_metrics = ['Standard Gls', 'Performance xG', 'Standard Sh', 'Standard SoT', 
+                      'Performance Ast', 'SCA SCA', 'GCA GCA']
+    possession_metrics = ['Touches Touches', 'Total Cmp%', 'Carries Carries', 
+                          'Progression PrgP', 'Progression PrgC']
+    defense_metrics = ['Tackles Tkl', 'Performance Int', 'Blocks Blocks', 
+                       'Clr', 'Performance Recov']
     
-    # Filter metrics that exist in both datasets
-    available_metrics = [m for m in radar_metrics if m in team1_data.index and m in team2_data.index]
+    # Combine all metrics
+    all_radar_metrics = attack_metrics + possession_metrics + defense_metrics
+    
+    # Get normalized versions of these metrics that exist in both datasets
+    available_metrics = []
+    for metric in all_radar_metrics:
+        normalized_metric = f'Normalized {metric}'
+        if normalized_metric in team1_data.index and normalized_metric in team2_data.index:
+            available_metrics.append(normalized_metric)
+    
+    # If we don't have enough specific metrics, fall back to any available normalized metrics
+    if len(available_metrics) < 5:
+        available_metrics = [col for col in team1_data.index 
+                           if col.startswith('Normalized') and col in team2_data.index][:10]
     
     if len(available_metrics) < 3:  # Need at least 3 metrics for a meaningful radar chart
         return None
@@ -581,20 +640,50 @@ def main():
                     # Display team metrics in tabs
                     tabs = st.tabs(["Attack", "Possession", "Defense"])
                     
-                    # Define metrics for each category
-                    attack_metrics = [m for m in all_metrics if any(keyword in m.lower() for keyword in 
-                                     ['goal', 'shot', 'xg', 'key pass', 'assist', 'chance'])]
+                    # Define metrics for each category based on actual column names
+                    attack_keywords = ['gls', 'goals', 'shot', 'sh/', 'sot', 'g+a', 'pk', 'xg', 'g-xg', 
+                                     'ast', 'assist', 'sca', 'gca', 'key pass', 'kp', 'crs', 'cross',
+                                     'g/sh', 'g/sot', 'npxg', 'xa', 'xag']
                     
-                    possession_metrics = [m for m in all_metrics if any(keyword in m.lower() for keyword in 
-                                         ['touch', 'pass', 'carry', 'progression', 'completion', 'third'])]
+                    possession_keywords = ['touch', 'pass', 'cmp', 'att', 'prgp', 'prgr', 'prgc', 
+                                         'carry', 'carries', 'dis', 'totdist', 'prgdist', 'mid 3rd', 
+                                         'att 3rd', 'ppa', 'cpa', 'live', 'dead', 
+                                         'short', 'medium', 'long', 'tb', 'sw', 'ti', 'ck']
                     
-                    defense_metrics = [m for m in all_metrics if any(keyword in m.lower() for keyword in 
-                                      ['tackle', 'interception', 'block', 'clearance', 'error', 'foul'])]
+                    defense_keywords = ['tkl', 'tackle', 'int', 'interception', 'block', 'clr', 'clear',
+                                      'err', 'error', 'foul', 'fls', 'fld', 'duel', 'aerial', 
+                                      'def 3rd', 'tkl%', 'tkl+int', 'tklw',
+                                      'challenge', 'recov']
+                    
+                    # Categorize metrics
+                    attack_metrics = []
+                    possession_metrics = []
+                    defense_metrics = []
+                    
+                    for metric in all_metrics:
+                        metric_lower = metric.lower()
+                        
+                        # Check attack metrics
+                        if any(keyword in metric_lower for keyword in attack_keywords):
+                            if not any(ex in metric_lower for ex in ['def', 'tkl', 'int', 'block', 'clr']):
+                                attack_metrics.append(metric)
+                        
+                        # Check possession metrics
+                        elif any(keyword in metric_lower for keyword in possession_keywords):
+                            if not any(ex in metric_lower for ex in ['gls', 'shot', 'g+a', 'xg', 'tkl', 'int', 'block']):
+                                possession_metrics.append(metric)
+                        
+                        # Check defense metrics
+                        elif any(keyword in metric_lower for keyword in defense_keywords):
+                            if not any(ex in metric_lower for ex in ['gls', 'shot', 'g+a', 'xg', 'pass', 'cmp']):
+                                defense_metrics.append(metric)
                     
                     # Attack tab
                     with tabs[0]:
                         if attack_metrics:
-                            chart = create_team_metrics_chart(team_data, attack_metrics, normalized=show_normalized)
+                            # Limit to top 15 metrics for clarity
+                            display_metrics = attack_metrics[:15]
+                            chart = create_team_metrics_chart(team_data, display_metrics, normalized=show_normalized)
                             if chart:
                                 st.plotly_chart(chart, use_container_width=True)
                         else:
@@ -603,7 +692,9 @@ def main():
                     # Possession tab
                     with tabs[1]:
                         if possession_metrics:
-                            chart = create_team_metrics_chart(team_data, possession_metrics, normalized=show_normalized)
+                            # Limit to top 15 metrics for clarity
+                            display_metrics = possession_metrics[:15]
+                            chart = create_team_metrics_chart(team_data, display_metrics, normalized=show_normalized)
                             if chart:
                                 st.plotly_chart(chart, use_container_width=True)
                         else:
@@ -611,6 +702,14 @@ def main():
                     
                     # Defense tab
                     with tabs[2]:
+                        if defense_metrics:
+                            # Limit to top 15 metrics for clarity
+                            display_metrics = defense_metrics[:15]
+                            chart = create_team_metrics_chart(team_data, display_metrics, normalized=show_normalized)
+                            if chart:
+                                st.plotly_chart(chart, use_container_width=True)
+                        else:
+                            st.warning("No defense metrics available for this team.")
                         if defense_metrics:
                             chart = create_team_metrics_chart(team_data, defense_metrics, normalized=show_normalized)
                             if chart:
@@ -727,25 +826,40 @@ def main():
                     
                     # Create filtered comparison based on available metrics
                     comparison_data = []
+                    
+                    # Define key display metrics based on actual column names
                     key_display_metrics = [
-                        'Goals', 'Goals Per 90', 'xG', 'G-xG',
-                        'Shots Per 90', 'Shot on Target %',
-                        'Touches Per 90', 'Pass Completion %',
-                        'Progressive Passes Per 90', 'Progressive Carries Per 90',
-                        'Tackles + Interceptions Per 90'
+                        'Standard Gls', 'Performance xG', 'Expected G-xG',
+                        'Standard Sh', 'Standard SoT', 'Standard SoT%',
+                        'Performance Ast', 'SCA SCA', 'GCA GCA',
+                        'Touches Touches', 'Total Cmp%', 'Carries Carries',
+                        'Progression PrgP', 'Progression PrgC',
+                        'Tackles Tkl', 'Performance Int', 'Tkl+Int',
+                        'Blocks Blocks', 'Clr', 'Performance Recov'
                     ]
                     
+                    # Also check for Per 90 versions of metrics
+                    per_90_metrics = []
                     for metric in key_display_metrics:
+                        per_90_version = f"Per 90 Minutes {metric}"
+                        if per_90_version in team1_data.index and per_90_version in team2_data.index:
+                            per_90_metrics.append(per_90_version)
+                    
+                    all_display_metrics = key_display_metrics + per_90_metrics
+                    
+                    for metric in all_display_metrics:
                         if metric in team1_data.index and metric in team2_data.index:
                             val1 = team1_data[metric]
                             val2 = team2_data[metric]
                             
-                            comparison_data.append({
-                                'Metric': metric,
-                                f'{team1}': f"{val1:.2f}",
-                                f'{team2}': f"{val2:.2f}",
-                                'Difference': f"{val1 - val2:.2f}"
-                            })
+                            # Skip if both values are NaN or 0
+                            if pd.notna(val1) and pd.notna(val2) and (val1 != 0 or val2 != 0):
+                                comparison_data.append({
+                                    'Metric': metric,
+                                    f'{team1}': f"{val1:.2f}",
+                                    f'{team2}': f"{val2:.2f}",
+                                    'Difference': f"{val1 - val2:.2f}"
+                                })
                     
                     if comparison_data:
                         comparison_df = pd.DataFrame(comparison_data)
@@ -775,13 +889,7 @@ def main():
         ### Normalized Values:
         - All metrics are scaled 0-1 within each competition for fair comparison
         - Toggle between normalized and raw values using the checkbox
-        
-        ### Data Requirements:
-        The app loads real football data from your GitHub repository. Ensure your CSV contains:
-        - Team/Squad column
-        - Competition/League column  
-        - Season column
-        - Various performance metrics (goals, shots, passes, etc.)
+     
         """)
     else:
         st.error("Error loading data. Please check if the CSV file is accessible and properly formatted.")
